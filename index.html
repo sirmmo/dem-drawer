@@ -58,6 +58,7 @@
             <option value="lower">Lower</option>
             <option value="smooth">Smooth</option>
             <option value="flatten">Flatten to value</option>
+            <option value="noise">Noise (Perlin)</option>
           </select>
         </div>
         <div class="row">
@@ -76,15 +77,65 @@
           <label>Target (m)</label>
           <input id="brush-target" type="number" step="1" value="100" />
         </div>
+        <div id="noise-rows" style="display:none;">
+          <div class="row">
+            <label>Feature size (m)</label>
+            <input id="brush-noise-feature" type="number" min="1" step="10" value="500" />
+          </div>
+          <div class="row">
+            <label>Octaves</label>
+            <input id="brush-noise-octaves" type="number" min="1" max="8" step="1" value="4" />
+          </div>
+        </div>
       </section>
 
       <section class="group">
         <label>DEM display</label>
         <div class="row">
+          <label>Mode</label>
+          <select id="display-mode">
+            <option value="ramp">Color ramp</option>
+            <option value="hillshade">Hillshade</option>
+            <option value="shaded">Shaded relief (ramp + hillshade)</option>
+          </select>
+        </div>
+        <div class="row">
           <label>Opacity</label>
           <input id="overlay-opacity" type="range" min="0" max="1" step="0.05" value="1.0" />
         </div>
+        <details id="sun-controls">
+          <summary>Sun &amp; relief</summary>
+          <div class="row">
+            <label>Azimuth °</label>
+            <input id="sun-azimuth" type="range" min="0" max="360" step="1" value="315" />
+            <span class="muted" id="sun-azimuth-val">315</span>
+          </div>
+          <div class="row">
+            <label>Altitude °</label>
+            <input id="sun-altitude" type="range" min="1" max="89" step="1" value="45" />
+            <span class="muted" id="sun-altitude-val">45</span>
+          </div>
+          <div class="row">
+            <label>Z exag.</label>
+            <input id="sun-zfactor" type="number" min="0.1" step="0.1" value="1" />
+          </div>
+        </details>
         <div class="muted" id="stats">—</div>
+      </section>
+
+      <section class="group">
+        <label>Control points (IDW)</label>
+        <div class="row">
+          <button id="cp-toggle" style="flex:1;">Place control points</button>
+          <button id="cp-clear" class="ghost">Clear</button>
+        </div>
+        <div class="muted" style="margin:4px 0;">In place mode, click on the map and enter an elevation (meters).</div>
+        <div class="row">
+          <label>Power</label>
+          <input id="cp-power" type="number" min="1" max="6" step="0.5" value="2" />
+          <button id="cp-generate">Generate</button>
+        </div>
+        <div id="cp-list" style="margin-top:6px; max-height:120px; overflow-y:auto;"></div>
       </section>
 
       <section class="group">

@@ -1,13 +1,16 @@
 import { Heightmap } from './heightmap';
+import { fbm2 } from './noise';
 
-export type BrushMode = 'raise' | 'lower' | 'smooth' | 'flatten';
+export type BrushMode = 'raise' | 'lower' | 'smooth' | 'flatten' | 'noise';
 
 export interface BrushParams {
   mode: BrushMode;
   radiusMeters: number;
-  strength: number;     // meters per stroke step (raise/lower) or weight 0..1 for smooth
+  strength: number;     // meters per stroke step (raise/lower/noise) or weight 0..1 for smooth
   hardness: number;     // 0 = soft falloff, 1 = hard edge
   flattenTarget: number;
+  noiseFeatureMeters: number; // wavelength of the fundamental octave
+  noiseOctaves: number;
 }
 
 // Apply brush at pixel-space center (cx, cy). Each call is one "stamp".
@@ -33,6 +36,31 @@ export function applyBrush(
   const w = hm.width;
 
   const mask = hm.mask;
+
+  if (p.mode === 'noise') {
+    // Sample noise in world space (meters) so the feature size is independent of
+    // the heightmap resolution. fbm2 returns ~[-1, 1].
+    const inv = 1 / Math.max(p.noiseFeatureMeters, 1);
+    const mppX = hm.metersPerPixelX;
+    const mppY = hm.metersPerPixelY;
+    const octaves = Math.max(1, Math.min(8, Math.round(p.noiseOctaves)));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const dx = x - cx;
+        const dy = y - cy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > r2) continue;
+        const f = falloff(Math.sqrt(d2) / radiusPx, innerRatio);
+        const wx = x * mppX * inv;
+        const wy = y * mppY * inv;
+        const n = fbm2(wx, wy, octaves);
+        const idx = y * w + x;
+        data[idx] += p.strength * f * n;
+        mask[idx] = 1;
+      }
+    }
+    return { x0, y0, x1, y1 };
+  }
 
   if (p.mode === 'smooth') {
     // 3x3 box blur weighted by falloff.

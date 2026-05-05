@@ -1,9 +1,12 @@
 import maplibregl from 'maplibre-gl';
 import { Heightmap } from './heightmap';
 import { ramp } from './colormap';
+import { hillshadeAt, SunParams, DEFAULT_SUN } from './hillshade';
 
 const SOURCE_ID = 'dem-overlay';
 const LAYER_ID = 'dem-overlay-layer';
+
+export type DisplayMode = 'ramp' | 'hillshade' | 'shaded';
 
 export class HeightmapOverlay {
   private map: maplibregl.Map;
@@ -12,6 +15,8 @@ export class HeightmapOverlay {
   private hm: Heightmap | null = null;
   private rangeMin = 0;
   private rangeMax = 1;
+  private mode: DisplayMode = 'ramp';
+  private sun: SunParams = { ...DEFAULT_SUN };
 
   constructor(map: maplibregl.Map, canvas: HTMLCanvasElement) {
     this.map = map;
@@ -62,6 +67,17 @@ export class HeightmapOverlay {
     }
   }
 
+  setDisplayMode(mode: DisplayMode) {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    this.repaintAll();
+  }
+
+  setSun(sun: Partial<SunParams>) {
+    this.sun = { ...this.sun, ...sun };
+    if (this.mode !== 'ramp') this.repaintAll();
+  }
+
   repaintAll() {
     if (!this.hm) return;
     this.refreshRange();
@@ -78,7 +94,13 @@ export class HeightmapOverlay {
     if (Math.abs(prevMin - this.rangeMin) > 1e-3 || Math.abs(prevMax - this.rangeMax) > 1e-3) {
       this.paintRect(0, 0, this.hm.width - 1, this.hm.height - 1);
     } else {
-      this.paintRect(x0, y0, x1, y1);
+      // Hillshade samples a 3x3 neighborhood, so neighbors of changed pixels also need recompute.
+      const pad = this.mode === 'ramp' ? 0 : 1;
+      const nx0 = Math.max(0, x0 - pad);
+      const ny0 = Math.max(0, y0 - pad);
+      const nx1 = Math.min(this.hm.width - 1, x1 + pad);
+      const ny1 = Math.min(this.hm.height - 1, y1 + pad);
+      this.paintRect(nx0, ny0, nx1, ny1);
     }
     this.notifyDirty();
   }
@@ -103,6 +125,8 @@ export class HeightmapOverlay {
     const data = this.hm.data;
     const mask = this.hm.mask;
     const W = this.hm.width;
+    const H = this.hm.height;
+    const cellSize = this.hm.metersPerPixelX;
     const span = this.rangeMax - this.rangeMin;
     const isFlat = span <= 1e-6;
     let p = 0;
@@ -113,9 +137,23 @@ export class HeightmapOverlay {
           buf[p++] = 0; buf[p++] = 0; buf[p++] = 0; buf[p++] = 0;
           continue;
         }
-        const v = data[idx];
-        const t = isFlat ? 0.5 : (v - this.rangeMin) / span;
-        const [r, g, b] = ramp(t);
+        let r = 255, g = 255, b = 255;
+        if (this.mode === 'hillshade') {
+          const s = hillshadeAt(data, mask, W, H, x, y, cellSize, this.sun);
+          r = g = b = s;
+        } else {
+          const v = data[idx];
+          const t = isFlat ? 0.5 : (v - this.rangeMin) / span;
+          [r, g, b] = ramp(t);
+          if (this.mode === 'shaded') {
+            const s = hillshadeAt(data, mask, W, H, x, y, cellSize, this.sun) / 255;
+            // Mix toward gray slightly so shaded areas darken without crushing color.
+            const k = 0.3 + 0.7 * s;
+            r = r * k;
+            g = g * k;
+            b = b * k;
+          }
+        }
         buf[p++] = r;
         buf[p++] = g;
         buf[p++] = b;

@@ -8,6 +8,9 @@ import { pickBBox, buildHeightmap } from './extent';
 import { exportHeightmap, exportInt16GeoTIFF, exportGrayscalePNG } from './export';
 import { setBasemapOpacity, clearOpacityCache } from './basemap-opacity';
 import { registerPaintedDemProtocol, attachTerrain, detachTerrain, refreshTerrain, setTerrainExaggeration } from './terrain-source';
+import type { DisplayMode } from './overlay';
+import { ControlPointManager } from './control-points';
+import { applyIDW } from './idw';
 
 interface AppState {
   map: maplibregl.Map;
@@ -19,6 +22,8 @@ interface AppState {
   lastPxlPaint: { x: number; y: number } | null;
   basemap: Basemap;
   terrainOn: boolean;
+  cps: ControlPointManager | null;
+  cpMode: boolean;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -39,12 +44,16 @@ function init() {
       strength: 5,
       hardness: 0.5,
       flattenTarget: 100,
+      noiseFeatureMeters: 500,
+      noiseOctaves: 4,
     },
     painting: false,
     paintMode: false,
     lastPxlPaint: null,
     basemap: initialBasemap,
     terrainOn: false,
+    cps: null,
+    cpMode: false,
   };
 
   registerPaintedDemProtocol(() => state.heightmap);
@@ -59,6 +68,85 @@ function init() {
   setupCursorReadout(state);
   setupBrushCursorPreview(state);
   setupTerrainControls(state);
+  setupDisplayMode(state);
+  setupControlPoints(state);
+}
+
+function setupDisplayMode(state: AppState) {
+  const select = $<HTMLSelectElement>('display-mode');
+  select.addEventListener('change', () => {
+    state.overlay.setDisplayMode(select.value as DisplayMode);
+  });
+
+  const az = $<HTMLInputElement>('sun-azimuth');
+  const azVal = $('sun-azimuth-val');
+  const alt = $<HTMLInputElement>('sun-altitude');
+  const altVal = $('sun-altitude-val');
+  const z = $<HTMLInputElement>('sun-zfactor');
+  const apply = () => {
+    azVal.textContent = az.value;
+    altVal.textContent = alt.value;
+    state.overlay.setSun({
+      azimuthDeg: parseFloat(az.value),
+      altitudeDeg: parseFloat(alt.value),
+      zFactor: parseFloat(z.value) || 1,
+    });
+  };
+  for (const el of [az, alt, z]) el.addEventListener('input', apply);
+}
+
+function setupControlPoints(state: AppState) {
+  const listEl = $('cp-list');
+  const toggle = $<HTMLButtonElement>('cp-toggle');
+  const clearBtn = $<HTMLButtonElement>('cp-clear');
+  const generate = $<HTMLButtonElement>('cp-generate');
+  const power = $<HTMLInputElement>('cp-power');
+
+  state.cps = new ControlPointManager(state.map, listEl, () => {});
+
+  const applyMode = () => {
+    toggle.textContent = state.cpMode ? 'Stop placing' : 'Place control points';
+    toggle.classList.toggle('active', state.cpMode);
+    state.map.getCanvas().style.cursor = state.cpMode ? 'crosshair' : '';
+  };
+
+  toggle.addEventListener('click', () => {
+    if (state.paintMode) {
+      // Don't fight the paint handler.
+      $<HTMLButtonElement>('paint-toggle').click();
+    }
+    state.cpMode = !state.cpMode;
+    applyMode();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    state.cps?.clear();
+  });
+
+  state.map.on('click', (e) => {
+    if (!state.cpMode || !state.cps) return;
+    const raw = window.prompt('Elevation in meters?', '100');
+    if (raw === null) return;
+    const z = parseFloat(raw);
+    if (!isFinite(z)) return;
+    state.cps.add(e.lngLat.lng, e.lngLat.lat, z);
+  });
+
+  generate.addEventListener('click', () => {
+    if (!state.heightmap) {
+      alert('Draw a bbox first.');
+      return;
+    }
+    if (!state.cps || state.cps.count() < 2) {
+      alert('Add at least 2 control points.');
+      return;
+    }
+    const p = parseFloat(power.value) || 2;
+    applyIDW(state.heightmap, state.cps.list(), p);
+    state.overlay.repaintAll();
+    if (state.terrainOn) refreshTerrain(state.map);
+    updateStats(state);
+  });
 }
 
 function setupTerrainControls(state: AppState) {
@@ -129,6 +217,10 @@ function setupPaintModeToggle(state: AppState) {
       return;
     }
     state.paintMode = !state.paintMode;
+    if (state.paintMode && state.cpMode) {
+      // Exit CP mode so its map-click handler doesn't fire during paint.
+      $<HTMLButtonElement>('cp-toggle').click();
+    }
     apply();
   });
 }
@@ -221,6 +313,9 @@ function setupBrushControls(state: AppState) {
   const hardness = $<HTMLInputElement>('brush-hardness');
   const target = $<HTMLInputElement>('brush-target');
   const flattenRow = $('flatten-row');
+  const noiseRows = $('noise-rows');
+  const noiseFeature = $<HTMLInputElement>('brush-noise-feature');
+  const noiseOctaves = $<HTMLInputElement>('brush-noise-octaves');
 
   const sync = () => {
     state.brush = {
@@ -229,11 +324,14 @@ function setupBrushControls(state: AppState) {
       strength: parseFloat(strength.value) || 1,
       hardness: parseFloat(hardness.value) || 0,
       flattenTarget: parseFloat(target.value) || 0,
+      noiseFeatureMeters: parseFloat(noiseFeature.value) || 500,
+      noiseOctaves: parseFloat(noiseOctaves.value) || 4,
     };
     flattenRow.style.display = mode.value === 'flatten' ? 'flex' : 'none';
+    noiseRows.style.display = mode.value === 'noise' ? 'block' : 'none';
   };
 
-  for (const el of [mode, radius, strength, hardness, target]) {
+  for (const el of [mode, radius, strength, hardness, target, noiseFeature, noiseOctaves]) {
     el.addEventListener('input', sync);
     el.addEventListener('change', sync);
   }
