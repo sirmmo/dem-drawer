@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DEM Drawer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="map"></div>
+    <canvas id="heightmap-canvas"></canvas>
+
+    <aside id="panel">
+      <header>
+        <h1>DEM Drawer</h1>
+      </header>
+
+      <section class="group">
+        <label>Basemap</label>
+        <select id="basemap-select"></select>
+        <div class="row">
+          <label>Opacity</label>
+          <input id="basemap-opacity" type="range" min="0" max="1" step="0.05" value="0.5" />
+        </div>
+        <details>
+          <summary>Custom basemap</summary>
+          <select id="custom-type">
+            <option value="raster">Raster XYZ</option>
+            <option value="vector">Vector style URL</option>
+          </select>
+          <input id="custom-url" type="text" placeholder="https://…/{z}/{x}/{y}.png  or  https://…/style.json" />
+          <button id="custom-apply">Use</button>
+        </details>
+      </section>
+
+      <section class="group">
+        <label>Canvas extent</label>
+        <div class="row">
+          <button id="draw-bbox">Draw bbox</button>
+          <button id="clear-bbox" class="ghost">Clear</button>
+        </div>
+        <div class="row">
+          <label>m/px</label>
+          <input id="mpp" type="number" min="1" max="500" step="1" value="20" />
+        </div>
+        <div class="muted" id="extent-info">No extent set</div>
+      </section>
+
+      <section class="group">
+        <label>Brush</label>
+        <div class="row">
+          <button id="paint-toggle" class="primary" style="flex:1;">Enter paint mode</button>
+        </div>
+        <div class="muted" style="margin:4px 0 6px;">In paint mode, drag paints. Toggle off to pan/zoom.</div>
+        <div class="row">
+          <select id="brush-mode">
+            <option value="raise">Raise</option>
+            <option value="lower">Lower</option>
+            <option value="smooth">Smooth</option>
+            <option value="flatten">Flatten to value</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Radius (m)</label>
+          <input id="brush-radius" type="number" min="1" step="1" value="500" />
+        </div>
+        <div class="row">
+          <label>Strength (m)</label>
+          <input id="brush-strength" type="number" step="0.5" value="5" />
+        </div>
+        <div class="row">
+          <label>Hardness</label>
+          <input id="brush-hardness" type="range" min="0" max="1" step="0.05" value="0.5" />
+        </div>
+        <div class="row" id="flatten-row" style="display:none;">
+          <label>Target (m)</label>
+          <input id="brush-target" type="number" step="1" value="100" />
+        </div>
+      </section>
+
+      <section class="group">
+        <label>DEM display</label>
+        <div class="row">
+          <label>Opacity</label>
+          <input id="overlay-opacity" type="range" min="0" max="1" step="0.05" value="1.0" />
+        </div>
+        <div class="muted" id="stats">—</div>
+      </section>
+
+      <section class="group">
+        <label>3D terrain</label>
+        <div class="row">
+          <button id="terrain-toggle" style="flex:1;">Enable 3D</button>
+        </div>
+        <div class="row">
+          <label>Exaggeration</label>
+          <input id="terrain-exag" type="range" min="0.5" max="10" step="0.1" value="2.0" />
+        </div>
+        <div class="row">
+          <label>Pitch</label>
+          <input id="map-pitch" type="range" min="0" max="80" step="1" value="0" />
+        </div>
+        <div class="muted">Tip: hold <kbd>Ctrl</kbd> and drag to pitch/rotate the map.</div>
+      </section>
+
+      <section class="group">
+        <label>Export</label>
+        <div class="row">
+          <label>Smoothing</label>
+          <input id="export-smooth" type="number" min="0" max="20" step="1" value="2" style="flex:1;" />
+          <span class="muted">passes</span>
+        </div>
+        <div class="row">
+          <label style="flex:1;"><input id="export-nodata" type="checkbox" checked /> Unpainted → NoData</label>
+        </div>
+        <div class="row">
+          <label>NoData value</label>
+          <input id="export-nodata-value" type="number" step="1" value="-9999" />
+        </div>
+        <button id="export-btn" class="primary">Export GeoTIFF</button>
+        <button id="reset-btn" class="ghost">Reset heightmap</button>
+      </section>
+    </aside>
+
+    <div id="cursor-readout" class="hidden"></div>
+    <div id="brush-cursor" class="hidden"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
