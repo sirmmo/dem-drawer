@@ -1,5 +1,5 @@
 import { Heightmap } from './heightmap';
-import { writeFloat32GeoTIFF } from './geotiff-write';
+import { writeGeoTIFF } from './geotiff-write';
 
 export interface ExportOptions {
   smoothPasses: number;   // box-blur passes within painted region
@@ -19,7 +19,7 @@ export function exportHeightmap(hm: Heightmap, opts: ExportOptions) {
     out[i] = hm.mask[i] ? smoothed[i] : fill;
   }
 
-  const buf = writeFloat32GeoTIFF({
+  const buf = writeGeoTIFF({
     width: hm.width,
     height: hm.height,
     data: out,
@@ -30,11 +30,90 @@ export function exportHeightmap(hm: Heightmap, opts: ExportOptions) {
     noData: opts.useNoData ? opts.noDataValue : undefined,
   });
 
-  const blob = new Blob([buf], { type: 'image/tiff' });
+  triggerDownload(new Blob([buf], { type: 'image/tiff' }), opts.filename ?? 'dem.tif');
+}
+
+// Int16 GeoTIFF: integer meters, NoData = -32768. The classic "DEM raster".
+export function exportInt16GeoTIFF(hm: Heightmap, opts: { smoothPasses: number; useNoData: boolean; filename?: string }) {
+  const NO_DATA = -32768;
+  const smoothed = opts.smoothPasses > 0 ? smoothPainted(hm, opts.smoothPasses) : hm.data;
+  const out = new Int16Array(hm.width * hm.height);
+  const fill = opts.useNoData ? NO_DATA : 0;
+  for (let i = 0; i < out.length; i++) {
+    if (!hm.mask[i]) {
+      out[i] = fill;
+    } else {
+      // Clamp into Int16 range so weird values don't wrap.
+      const v = Math.round(smoothed[i]);
+      out[i] = v < -32767 ? -32767 : v > 32767 ? 32767 : v;
+    }
+  }
+  const buf = writeGeoTIFF({
+    width: hm.width,
+    height: hm.height,
+    data: out,
+    bboxMerc: hm.bboxMerc,
+    metersPerPixelX: hm.metersPerPixelX,
+    metersPerPixelY: hm.metersPerPixelY,
+    epsg: 3857,
+    noData: opts.useNoData ? NO_DATA : undefined,
+  });
+  triggerDownload(new Blob([buf], { type: 'image/tiff' }), opts.filename ?? 'dem-int16.tif');
+}
+
+// 8-bit grayscale PNG: normalized to [min, max] of painted region. Range is
+// embedded in the filename (e.g. dem-grayscale_min-3.0_max142.5.png) so callers
+// can recover absolute meters.
+export function exportGrayscalePNG(hm: Heightmap, opts: { smoothPasses: number; transparentUnpainted: boolean; filenameBase?: string }): Promise<void> {
+  const smoothed = opts.smoothPasses > 0 ? smoothPainted(hm, opts.smoothPasses) : hm.data;
+  const stats = hm.stats();
+  const min = stats.min;
+  const max = stats.touched > 0 ? Math.max(stats.max, min + 1e-6) : 1;
+  const span = max - min;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = hm.width;
+  canvas.height = hm.height;
+  const ctx = canvas.getContext('2d')!;
+  const img = ctx.createImageData(hm.width, hm.height);
+  const buf = img.data;
+  for (let i = 0; i < hm.data.length; i++) {
+    const idx = i * 4;
+    if (!hm.mask[i]) {
+      if (opts.transparentUnpainted) {
+        buf[idx] = 0; buf[idx + 1] = 0; buf[idx + 2] = 0; buf[idx + 3] = 0;
+      } else {
+        buf[idx] = 0; buf[idx + 1] = 0; buf[idx + 2] = 0; buf[idx + 3] = 255;
+      }
+    } else {
+      const t = (smoothed[i] - min) / span;
+      const v = Math.max(0, Math.min(255, Math.round(t * 255)));
+      buf[idx] = v;
+      buf[idx + 1] = v;
+      buf[idx + 2] = v;
+      buf[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (!blob) return resolve();
+      const base = opts.filenameBase ?? 'dem-grayscale';
+      const minStr = min.toFixed(2).replace(/\./g, '_');
+      const maxStr = max.toFixed(2).replace(/\./g, '_');
+      const name = `${base}_min${minStr}_max${maxStr}.png`;
+      triggerDownload(blob, name);
+      resolve();
+    }, 'image/png');
+  });
+}
+
+function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = opts.filename ?? 'dem.tif';
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();

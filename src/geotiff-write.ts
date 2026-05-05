@@ -1,6 +1,8 @@
-// Minimal Float32 GeoTIFF writer (single strip, EPSG:3857).
+// Minimal GeoTIFF writer (single strip, EPSG:3857). Supports Float32, Int16, Uint16, Uint8.
 // TIFF spec: https://www.adobe.io/open/standards/TIFF.html
 // GeoTIFF spec: https://docs.ogc.org/is/19-008r4/19-008r4.html
+
+type SampleArray = Float32Array | Int16Array | Uint16Array | Uint8Array;
 
 interface IfdEntry {
   tag: number;
@@ -15,7 +17,7 @@ const TYPE_SIZE: Record<number, number> = { 2: 1, 3: 2, 4: 4, 11: 4, 12: 8 };
 export interface ExportParams {
   width: number;
   height: number;
-  data: Float32Array;          // row-major, top-left origin (y=0 = north)
+  data: SampleArray;           // row-major, top-left origin (y=0 = north)
   bboxMerc: { minX: number; minY: number; maxX: number; maxY: number };
   metersPerPixelX: number;
   metersPerPixelY: number;
@@ -23,9 +25,20 @@ export interface ExportParams {
   epsg?: number;               // defaults to 3857
 }
 
-export function writeFloat32GeoTIFF(p: ExportParams): ArrayBuffer {
+interface SampleSpec { bytes: number; bitsPerSample: number; sampleFormat: number }
+
+function specFor(data: SampleArray): SampleSpec {
+  if (data instanceof Float32Array) return { bytes: 4, bitsPerSample: 32, sampleFormat: 3 };
+  if (data instanceof Int16Array)   return { bytes: 2, bitsPerSample: 16, sampleFormat: 2 };
+  if (data instanceof Uint16Array)  return { bytes: 2, bitsPerSample: 16, sampleFormat: 1 };
+  if (data instanceof Uint8Array)   return { bytes: 1, bitsPerSample: 8,  sampleFormat: 1 };
+  throw new Error('Unsupported sample array type');
+}
+
+export function writeGeoTIFF(p: ExportParams): ArrayBuffer {
+  const spec = specFor(p.data);
   const epsg = p.epsg ?? 3857;
-  const stripByteCount = p.width * p.height * 4;
+  const stripByteCount = p.width * p.height * spec.bytes;
 
   // GeoKeyDirectory: header (4 SHORTs) + N keys × 4 SHORTs.
   const geoKeys: number[] = [
@@ -40,7 +53,7 @@ export function writeFloat32GeoTIFF(p: ExportParams): ArrayBuffer {
   const entries: IfdEntry[] = [
     { tag: 256, type: 4, count: 1, values: [p.width] },                    // ImageWidth
     { tag: 257, type: 4, count: 1, values: [p.height] },                   // ImageLength
-    { tag: 258, type: 3, count: 1, values: [32] },                         // BitsPerSample
+    { tag: 258, type: 3, count: 1, values: [spec.bitsPerSample] },         // BitsPerSample
     { tag: 259, type: 3, count: 1, values: [1] },                          // Compression: none
     { tag: 262, type: 3, count: 1, values: [1] },                          // PhotometricInterpretation: BlackIsZero
     { tag: 273, type: 4, count: 1, values: [0] },                          // StripOffsets (patched)
@@ -48,7 +61,7 @@ export function writeFloat32GeoTIFF(p: ExportParams): ArrayBuffer {
     { tag: 278, type: 4, count: 1, values: [p.height] },                   // RowsPerStrip (whole image)
     { tag: 279, type: 4, count: 1, values: [stripByteCount] },             // StripByteCounts
     { tag: 284, type: 3, count: 1, values: [1] },                          // PlanarConfiguration: chunky
-    { tag: 339, type: 3, count: 1, values: [3] },                          // SampleFormat: IEEE float
+    { tag: 339, type: 3, count: 1, values: [spec.sampleFormat] },          // SampleFormat
     { tag: 33550, type: 12, count: 3, values: [p.metersPerPixelX, p.metersPerPixelY, 0] }, // ModelPixelScale
     { tag: 33922, type: 12, count: 6, values: [0, 0, 0, p.bboxMerc.minX, p.bboxMerc.maxY, 0] }, // ModelTiepoint
     { tag: 34735, type: 3, count: geoKeys.length, values: geoKeys },       // GeoKeyDirectory
@@ -129,12 +142,16 @@ export function writeFloat32GeoTIFF(p: ExportParams): ArrayBuffer {
   });
   view.setUint32(p2, 0, LE); // next IFD = 0
 
-  // --- Raster ---
-  const out = new Float32Array(buf, stripOffset, p.width * p.height);
-  out.set(p.data);
+  // --- Raster: copy raw bytes regardless of sample type. ---
+  const dst = new Uint8Array(buf, stripOffset, stripByteCount);
+  const src = new Uint8Array(p.data.buffer, p.data.byteOffset, p.data.byteLength);
+  dst.set(src);
 
   return buf;
 }
+
+// Back-compat alias.
+export const writeFloat32GeoTIFF = writeGeoTIFF;
 
 function writeValuesInline(view: DataView, u8: Uint8Array, offset: number, e: IfdEntry) {
   if (e.type === 2) {

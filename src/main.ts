@@ -5,7 +5,7 @@ import { Heightmap } from './heightmap';
 import { HeightmapOverlay } from './overlay';
 import { applyBrush, BrushParams, strokeLine } from './brush';
 import { pickBBox, buildHeightmap } from './extent';
-import { exportHeightmap } from './export';
+import { exportHeightmap, exportInt16GeoTIFF, exportGrayscalePNG } from './export';
 import { setBasemapOpacity, clearOpacityCache } from './basemap-opacity';
 import { registerPaintedDemProtocol, attachTerrain, detachTerrain, refreshTerrain, setTerrainExaggeration } from './terrain-source';
 
@@ -254,20 +254,49 @@ function setupOverlayControls(state: AppState) {
 }
 
 function setupExport(state: AppState) {
-  $<HTMLButtonElement>('export-btn').addEventListener('click', () => {
+  const readExportSettings = () => ({
+    smoothPasses: Math.max(0, parseInt($<HTMLInputElement>('export-smooth').value, 10) || 0),
+    useNoData: $<HTMLInputElement>('export-nodata').checked,
+    noDataValue: parseFloat($<HTMLInputElement>('export-nodata-value').value) || -9999,
+  });
+
+  const requireHeightmap = () => {
     if (!state.heightmap) {
       alert('Set an extent first.');
-      return;
+      return false;
     }
+    return true;
+  };
+
+  $<HTMLButtonElement>('export-btn').addEventListener('click', () => {
+    if (!requireHeightmap()) return;
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const smoothPasses = Math.max(0, parseInt($<HTMLInputElement>('export-smooth').value, 10) || 0);
-    const useNoData = $<HTMLInputElement>('export-nodata').checked;
-    const noDataValue = parseFloat($<HTMLInputElement>('export-nodata-value').value) || -9999;
-    exportHeightmap(state.heightmap, {
-      smoothPasses,
-      useNoData,
-      noDataValue,
+    const s = readExportSettings();
+    exportHeightmap(state.heightmap!, {
+      ...s,
       filename: `dem-${ts}.tif`,
+    });
+  });
+
+  $<HTMLButtonElement>('export-int16-btn').addEventListener('click', () => {
+    if (!requireHeightmap()) return;
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const s = readExportSettings();
+    exportInt16GeoTIFF(state.heightmap!, {
+      smoothPasses: s.smoothPasses,
+      useNoData: s.useNoData,
+      filename: `dem-int16-${ts}.tif`,
+    });
+  });
+
+  $<HTMLButtonElement>('export-png-btn').addEventListener('click', () => {
+    if (!requireHeightmap()) return;
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const s = readExportSettings();
+    exportGrayscalePNG(state.heightmap!, {
+      smoothPasses: s.smoothPasses,
+      transparentUnpainted: s.useNoData,
+      filenameBase: `dem-grayscale-${ts}`,
     });
   });
 
